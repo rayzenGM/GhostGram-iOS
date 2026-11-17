@@ -56,6 +56,16 @@ jobs:
               sys.exit('This source requires Xcode ' + required + ', which is absent on this runner.')
           PY
 
+      - name: Restore Bazel cache
+        id: bazel-cache
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/telegram-bazel-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-ghostgram-bazel-v1-${{ hashFiles('versions.json', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-ghostgram-bazel-v1-${{ hashFiles('versions.json', 'MODULE.bazel', 'MODULE.bazel.lock') }}-
+
       - name: Fetch source dependencies
         run: |
           # Upstream's relative URL otherwise resolves to rayzenGM/tgcalls in a fork.
@@ -87,6 +97,7 @@ jobs:
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
 
       - name: Build device IPA for re-signing
+        id: build-ipa
         run: |
           python3 -u build-system/Make/Make.py \
             --cacheDir="$RUNNER_TEMP/telegram-bazel-cache" \
@@ -104,6 +115,18 @@ jobs:
           path: bazel-bin/Telegram/Telegram.ipa
           if-no-files-found: error
           retention-days: 3
+
+      # Keep completed compilation work even if a later compiler action fails.
+      # Cache entries are immutable, so each attempt writes a new key and restores
+      # the newest compatible entry using the toolchain prefix above.
+      - name: Save Bazel cache (including failed builds)
+        if: ${{ always() && !cancelled() && (steps.build-ipa.outcome == 'success' || steps.build-ipa.outcome == 'failure') }}
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        timeout-minutes: 20
+        with:
+          path: ${{ runner.temp }}/telegram-bazel-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-ghostgram-bazel-v1-${{ hashFiles('versions.json', 'MODULE.bazel', 'MODULE.bazel.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Remove temporary API configuration
         if: always()
