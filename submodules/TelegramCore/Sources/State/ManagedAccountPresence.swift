@@ -16,22 +16,41 @@ private final class AccountPresenceManagerImpl {
     private let currentRequestDisposable = MetaDisposable()
     private var onlineTimer: SignalKitTimer?
     
-    private var wasOnline: Bool = false
+    private var activityDisposable: Disposable?
+    private var actionTimer: SignalKitTimer?
+    private var isForeground = false
     
     init(queue: Queue, shouldKeepOnlinePresence: Signal<Bool, NoError>, network: Network) {
         self.queue = queue
         self.network = network
         
-        self.shouldKeepOnlinePresenceDisposable = (shouldKeepOnlinePresence
-        |> distinctUntilChanged
-        |> deliverOn(self.queue)).start(next: { [weak self] value in
-            guard let `self` = self else {
+        self.shouldKeepOnlinePresenceDisposable = (combineLatest(shouldKeepOnlinePresence |> distinctUntilChanged, GhostGramSettings.shared.signal)
+        |> deliverOn(self.queue)).start(next: { [weak self] value, _ in
+            guard let self else { return }
+            self.isForeground = value
+            self.actionTimer?.invalidate()
+            self.actionTimer = nil
+            let settings = GhostGramSettings.shared
+            let online = value && !settings.active(.hideOnline) && !settings.active(.automaticOffline)
+            self.updatePresence(online)
+        })
+        self.activityDisposable = (network.ghostGramActivity.signal()
+        |> deliverOn(self.queue)).start(next: { [weak self] _ in
+            guard let self, GhostGramSettings.shared.active(.automaticOffline) else { return }
+            self.actionTimer?.invalidate()
+            if !self.isForeground {
+                self.updatePresence(false)
                 return
             }
-            if self.wasOnline != value {
-                self.wasOnline = value
-                self.updatePresence(value)
+            if !GhostGramSettings.shared.active(.hideOnline) {
+                self.updatePresence(true)
             }
+            let timer = SignalKitTimer(timeout: 3.0, repeat: false, completion: { [weak self] in
+                guard let self else { return }
+                self.updatePresence(false)
+            }, queue: self.queue)
+            self.actionTimer = timer
+            timer.start()
         })
     }
     
@@ -39,10 +58,14 @@ private final class AccountPresenceManagerImpl {
         assert(self.queue.isCurrent())
         self.shouldKeepOnlinePresenceDisposable?.dispose()
         self.currentRequestDisposable.dispose()
+        self.activityDisposable?.dispose()
+        self.actionTimer?.invalidate()
         self.onlineTimer?.invalidate()
     }
     
     private func updatePresence(_ isOnline: Bool) {
+        self.onlineTimer?.invalidate()
+        self.onlineTimer = nil
         let request: Signal<Api.Bool, MTRpcError>
         if isOnline {
             let timer = SignalKitTimer(timeout: 30.0, repeat: false, completion: { [weak self] in

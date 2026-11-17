@@ -19,6 +19,7 @@ enum SettingsSection: Int, CaseIterable {
     case phone
     case accounts
     case myProfile
+    case ghostGram
     case wallet
     case proxy
     case apps
@@ -153,6 +154,10 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
             interaction.openSettings(.profile)
         }))
         
+        items[.ghostGram]!.append(PeerInfoScreenDisclosureItem(id: 0, text: "Настройки GhostGram", icon: UIImage(systemName: "eye.slash.fill"), action: {
+            interaction.openSettings(.ghostGram)
+        }))
+
         if WalletConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 }).isAvailable {
             let balanceText: NSAttributedString
             if let balance = settings.walletBalance, balance > 10_000_000 {

@@ -904,6 +904,8 @@ private final class NetworkSpeedLimitedEventState {
 }
 
 public final class Network: NSObject {
+    let ghostGramActivity = ValuePipe<Void>()
+
     public let encryptionProvider: EncryptionProvider
     
     private let queue: Queue
@@ -1372,9 +1374,14 @@ public final class Network: NSObject {
         }
     }
     
-    func requestWithAdditionalInfo<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), info: NetworkRequestAdditionalInfo, tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<NetworkRequestResult<T>, MTRpcError> {
+    func requestWithAdditionalInfo<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), info: NetworkRequestAdditionalInfo, tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil, ghostAllowRead: Bool = false) -> Signal<NetworkRequestResult<T>, MTRpcError> {
         let requestService = self.requestService
+        let ghostActivity = self.ghostGramActivity
         return Signal { [requestService] subscriber in
+            if ghostGramSuppressRequest(data.0.name, allowRead: ghostAllowRead) {
+                subscriber.putCompletion()
+                return EmptyDisposable
+            }
             let request = NetworkEngineRequest(
                 payload: data.1.makeData(),
                 metadata: WrappedRequestMetadata(metadata: WrappedFunctionDescription(data.0), tag: tag),
@@ -1401,6 +1408,9 @@ public final class Network: NSObject {
                 completed: { result in
                     switch result {
                     case let .success(response):
+                        if ghostGramRevealsPresence(data.0.name) {
+                            ghostActivity.putNext(())
+                        }
                         if let result = (response.result as! BoxedMessage).body as? T {
                             subscriber.putNext(.result(result))
                             subscriber.putCompletion()
@@ -1418,9 +1428,14 @@ public final class Network: NSObject {
         }
     }
     
-    func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
+    func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil, ghostAllowRead: Bool = false) -> Signal<T, MTRpcError> {
         let requestService = self.requestService
+        let ghostActivity = self.ghostGramActivity
         return Signal { [requestService] subscriber in
+            if ghostGramSuppressRequest(data.0.name, allowRead: ghostAllowRead) {
+                subscriber.putCompletion()
+                return EmptyDisposable
+            }
             let request = NetworkEngineRequest(
                 payload: data.1.makeData(),
                 metadata: WrappedRequestMetadata(metadata: WrappedFunctionDescription(data.0), tag: tag),
@@ -1439,6 +1454,9 @@ public final class Network: NSObject {
                 completed: { result in
                     switch result {
                     case let .success(response):
+                        if ghostGramRevealsPresence(data.0.name) {
+                            ghostActivity.putNext(())
+                        }
                         if let result = (response.result as! BoxedMessage).body as? T {
                             subscriber.putNext(result)
                             subscriber.putCompletion()

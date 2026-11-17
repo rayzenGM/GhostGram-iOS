@@ -768,6 +768,7 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
     return signal
     |> mapToSignal { messages -> Signal<[MessageId?], NoError> in
         return account.postbox.transaction { transaction -> ([MessageId?], [MessageId]) in
+            if !messages.isEmpty { ghostGramReadOnAction(account: account, peerId: peerId) }
             var resultIds = Array<MessageId?>(repeating: nil, count: messages.count)
             var ephemeralMessageIds: [MessageId] = []
             var normalMessages: [(Bool, EnqueueMessage)] = []

@@ -183,6 +183,12 @@ func localReadMarkIsAheadOfServer(localMaxIncomingReadId: MessageId.Id, serverMa
 }
 
 private func validatePeerReadState(network: Network, postbox: Postbox, stateManager: AccountStateManager, peerId: PeerId) -> Signal<Never, PeerReadStateValidationError> {
+    // Ghost mode deliberately keeps a local read mark ahead of the server.
+    // Retire validation instead of retrying that intentional divergence forever.
+    if GhostGramSettings.shared.active(.hideRead) {
+        return confirmSynchronized(postbox: postbox, peerId: peerId) |> ignoreValues
+    }
+
     if peerId.namespace == Namespaces.Peer.SecretChat {
         // A secret chat has no Api.InputPeer, so there is no dialog to read an authoritative
         // read state from: every step below fails at inputPeer and asks to retry, forever.
@@ -251,7 +257,7 @@ private func validatePeerReadState(network: Network, postbox: Postbox, stateMana
     return maybeAppliedReadState
 }
 
-private func pushPeerReadState(network: Network, postbox: Postbox, stateManager: AccountStateManager, peerId: PeerId, readState: PeerReadState) -> Signal<PeerReadState, PeerReadStateValidationError> {
+private func pushPeerReadState(network: Network, postbox: Postbox, stateManager: AccountStateManager, peerId: PeerId, readState: PeerReadState, ghostAllowRead: Bool = false) -> Signal<PeerReadState, PeerReadStateValidationError> {
     if peerId.namespace == Namespaces.Peer.SecretChat {
         // Decide whether a request is needed before looking the peer up: inputSecretChat goes
         // through loadedPeerWithId, which never emits when the peer row is missing and fails
@@ -272,7 +278,7 @@ private func pushPeerReadState(network: Network, postbox: Postbox, stateManager:
             // A rejected push must not be retried: the operation is only cleared once it
             // succeeds, so a permanent rejection would loop without end. The cloud branches
             // below drop their errors the same way.
-            return network.request(Api.functions.messages.readEncryptedHistory(peer: inputPeer, maxDate: maxIncomingReadIndex.timestamp))
+            return network.request(Api.functions.messages.readEncryptedHistory(peer: inputPeer, maxDate: maxIncomingReadIndex.timestamp), ghostAllowRead: ghostAllowRead)
             |> `catch` { _ -> Signal<Api.Bool, NoError> in
                 return .complete()
             }
@@ -290,7 +296,7 @@ private func pushPeerReadState(network: Network, postbox: Postbox, stateManager:
                 let (channelId, accessHash) = (inputPeerChannelData.channelId, inputPeerChannelData.accessHash)
                 switch readState {
                 case let .idBased(maxIncomingReadId, _, _, _, markedUnread):
-                    var pushSignal: Signal<Void, NoError> = network.request(Api.functions.channels.readHistory(channel: Api.InputChannel.inputChannel(.init(channelId: channelId, accessHash: accessHash)), maxId: maxIncomingReadId))
+                    var pushSignal: Signal<Void, NoError> = network.request(Api.functions.channels.readHistory(channel: Api.InputChannel.inputChannel(.init(channelId: channelId, accessHash: accessHash)), maxId: maxIncomingReadId), ghostAllowRead: ghostAllowRead)
                     |> `catch` { _ -> Signal<Api.Bool, NoError> in
                         return .complete()
                     }
@@ -320,7 +326,7 @@ private func pushPeerReadState(network: Network, postbox: Postbox, stateManager:
             default:
                 switch readState {
                 case let .idBased(maxIncomingReadId, _, _, _, markedUnread):
-                    var pushSignal: Signal<Void, NoError> = network.request(Api.functions.messages.readHistory(peer: inputPeer, maxId: maxIncomingReadId))
+                    var pushSignal: Signal<Void, NoError> = network.request(Api.functions.messages.readHistory(peer: inputPeer, maxId: maxIncomingReadId), ghostAllowRead: ghostAllowRead)
                     |> map(Optional.init)
                     |> `catch` { _ -> Signal<Api.messages.AffectedMessages?, NoError> in
                         return .single(nil)
@@ -452,4 +458,24 @@ func synchronizePeerReadState(network: Network, postbox: Postbox, stateManager: 
         }
         return signal
     }
+}
+
+// A deliberate action releases a snapshot for this peer only. There is no global
+// time window in which another chat could leak its read receipts.
+func ghostGramReadOnAction(account: Account, peerId: PeerId) {
+    guard GhostGramSettings.shared.active(.readOnAction) else { return }
+    let namespace = peerId.namespace == Namespaces.Peer.SecretChat ? Namespaces.Message.SecretIncoming : Namespaces.Message.Cloud
+    let signal = account.postbox.transaction { transaction -> PeerReadState? in
+        guard let index = transaction.getTopPeerMessageIndex(peerId: peerId, namespace: namespace),
+              peerKeepsReadState(transaction.getPeer(peerId)) else { return nil }
+        _internal_applyMaxReadIndexInteractively(transaction: transaction, stateManager: account.stateManager, index: index)
+        return transaction.getPeerReadStates(peerId)?.first(where: { $0.0 == namespace })?.1
+    }
+    |> mapToSignal { state -> Signal<Never, NoError> in
+        guard let state else { return .complete() }
+        return pushPeerReadState(network: account.network, postbox: account.postbox, stateManager: account.stateManager, peerId: peerId, readState: state, ghostAllowRead: true)
+        |> `catch` { _ -> Signal<PeerReadState, NoError> in return .complete() }
+        |> ignoreValues
+    }
+    let _ = signal.startStandalone()
 }

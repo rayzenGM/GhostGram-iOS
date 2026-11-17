@@ -1112,3 +1112,32 @@ gets a shrunk test before its fix. The comparison with master, and every model r
   `docs/superpowers/specs/2026-10-15-difference-too-long-design.md` (the differenceTooLong rules).
 - `docs/superpowers/plans/`: the stage plans, kept as history.
 - `docs/superpowers/plans/2026-10-14-state-sync-foundation/followups.md`: what each stage parked.
+
+
+## GhostGram local privacy mode
+
+GhostGram deliberately allows the local read watermark to lead the server while
+`GhostGramSettings.hideRead` is active. `Network.request` and
+`requestWithAdditionalInfo` complete suppressed receipt signals without a response,
+error, or fabricated pts. Receipt workers still retire their pending operations.
+`validatePeerReadState` confirms the local operation without remote validation in
+this mode, avoiding endless retries of intentional divergence. History fetching,
+server updates, and difference recovery are not suppressed.
+
+`ghostGramReadOnAction` releases one snapshot for the acted-on peer via an explicit
+request argument; it never opens a process-wide permission window. Other clients
+and extensions do not inherit the main application's local preferences. Turning
+ghost mode off restores ordinary receipt behavior; a later ordinary read may
+advance the server watermark over previously hidden messages.
+
+Presence is per Network instance. Successful sends, reactions, and allowed reads
+restart a three-second offline timer; blocked receipts never emit activity. The
+foreground keepalive is disabled when either hide-online or automatic-offline is
+active. Hide-online never explicitly sends online, including during action bursts.
+Background transitions send offline immediately. Network/server latency and other
+sessions mean the remote UI is not guaranteed to change at exactly three seconds.
+
+Regression coverage: `Tests/GhostGramPrivacyTests.swift` checks transport silence,
+completion without invented server state, one-request read permission, and the
+master switch. Device validation must also check two chats, a second account,
+stories, typing, repeated actions, and backgrounding during the three-second timer.

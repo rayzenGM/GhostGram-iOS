@@ -27,6 +27,8 @@ public func updateMessageReactionsInteractively(account: Account, messageIds: [M
             return
         }
         
+        if !reactions.isEmpty { ghostGramReadOnAction(account: account, peerId: chatPeerId) }
+
         var messagesWithoutGroups: [Message] = []
         var messagesByGroupId: [Int64: [Message]] = [:]
         
@@ -174,6 +176,7 @@ public func updateMessageReactionsInteractively(account: Account, messageIds: [M
 
 func _internal_sendStarsReactionsInteractively(account: Account, messageId: MessageId, count: Int, privacy: TelegramPaidReactionPrivacy?) -> Signal<TelegramPaidReactionPrivacy, NoError> {
     return account.postbox.transaction { transaction -> TelegramPaidReactionPrivacy in
+        if count > 0 { ghostGramReadOnAction(account: account, peerId: messageId.peerId) }
         transaction.setPendingMessageAction(type: .sendStarsReaction, id: messageId, action: SendStarsReactionsAction(randomId: Int64.random(in: Int64.min ... Int64.max)))
         var resolvedPrivacyValue: TelegramPaidReactionPrivacy = .default
         transaction.updateMessage(messageId, update: { currentMessage in
