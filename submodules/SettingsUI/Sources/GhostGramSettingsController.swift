@@ -11,6 +11,14 @@ private enum GhostGramPage: String {
     case home = "GhostGram", privacy = "Режим призрака", appearance = "Оформление", other = "Другое"
 }
 
+private final class GhostGramArguments {
+    let openPage: (GhostGramPage) -> Void
+
+    init(openPage: @escaping (GhostGramPage) -> Void) {
+        self.openPage = openPage
+    }
+}
+
 private struct GhostGramEntry: ItemListNodeEntry {
     let stableId: Int32
     let section: ItemListSectionId
@@ -34,7 +42,7 @@ private struct GhostGramEntry: ItemListNodeEntry {
         } else if let page = self.page {
             let symbol = page == .privacy ? "eye.slash" : (page == .appearance ? "paintpalette" : "star")
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: UIImage(systemName: symbol), title: self.title, label: "", sectionId: self.section, style: .blocks, action: {
-                (arguments as? ((GhostGramPage) -> Void))?(page)
+                (arguments as! GhostGramArguments).openPage(page)
             })
         } else if let option = self.option {
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: self.title, value: self.value, sectionId: self.section, style: .blocks, updated: { value in
@@ -59,6 +67,9 @@ public func ghostGramSettingsController(context: AccountContext) -> ViewControll
 private func ghostGramPageController(context: AccountContext, page: GhostGramPage) -> ViewController {
     if page == .appearance { return ghostGramIconController(context: context) }
     var push: ((ViewController) -> Void)?
+    let arguments = GhostGramArguments(openPage: { page in
+        push?(ghostGramPageController(context: context, page: page))
+    })
     let signal = combineLatest(queue: .mainQueue(), context.sharedContext.presentationData, GhostGramSettings.shared.signal)
     |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let settings = GhostGramSettings.shared
@@ -105,12 +116,12 @@ private func ghostGramPageController(context: AccountContext, page: GhostGramPag
         }
         let data = ItemListPresentationData(presentationData)
         let state = ItemListControllerState(presentationData: data, title: .text(page.rawValue), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
-        return (state, (ItemListNodeState(presentationData: data, entries: entries, style: .blocks, animateChanges: true), { (page: GhostGramPage) in
-            push?(ghostGramPageController(context: context, page: page))
-        }))
+        return (state, (ItemListNodeState(presentationData: data, entries: entries, style: .blocks, animateChanges: true), arguments))
     }
     let controller = ItemListController(context: context, state: signal)
-    push = { [weak controller] next in controller?.push(next) }
+    push = { [weak controller] next in
+        (controller?.navigationController as? NavigationController)?.pushViewController(next)
+    }
     return controller
 }
 
