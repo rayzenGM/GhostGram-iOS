@@ -161,8 +161,15 @@ func managedSecretChatOutgoingOperations(auxiliaryMethods: AccountAuxiliaryMetho
                                     return sendServiceActionMessage(postbox: postbox, network: network, peerId: entry.peerId, action: .noop(layer: layer, actionGloballyUniqueId: actionGloballyUniqueId), tagLocalIndex: entry.tagLocalIndex, wasDelivered: operation.delivered)
                                 case let .readMessagesContent(layer, actionGloballyUniqueId, globallyUniqueIds):
                                     if GhostGramSettings.shared.active(.hideRead) {
-                                        // Preserve the encrypted operation sequence without disclosing a read.
-                                        return sendServiceActionMessage(postbox: postbox, network: network, peerId: entry.peerId, action: .noop(layer: layer, actionGloballyUniqueId: actionGloballyUniqueId), tagLocalIndex: entry.tagLocalIndex, wasDelivered: operation.delivered)
+                                        if let sequenceLayer = SecretChatSequenceBasedLayer(rawValue: layer.rawValue) {
+                                            // Preserve the encrypted sequence without disclosing a read.
+                                            return sendServiceActionMessage(postbox: postbox, network: network, peerId: entry.peerId, action: .noop(layer: sequenceLayer, actionGloballyUniqueId: actionGloballyUniqueId), tagLocalIndex: entry.tagLocalIndex, wasDelivered: operation.delivered)
+                                        } else {
+                                            // Layer 8 has neither sequence numbers nor a noop action.
+                                            return postbox.transaction { transaction -> Void in
+                                                let _ = transaction.operationLogRemoveEntry(peerId: entry.peerId, tag: OperationLogTags.SecretOutgoing, tagLocalIndex: entry.tagLocalIndex)
+                                            }
+                                        }
                                     }
                                     return sendServiceActionMessage(postbox: postbox, network: network, peerId: entry.peerId, action: .readMessageContents(layer: layer, actionGloballyUniqueId: actionGloballyUniqueId, globallyUniqueIds: globallyUniqueIds), tagLocalIndex: entry.tagLocalIndex, wasDelivered: operation.delivered)
                                 case let .setMessageAutoremoveTimeout(layer, actionGloballyUniqueId, timeout, messageId):
