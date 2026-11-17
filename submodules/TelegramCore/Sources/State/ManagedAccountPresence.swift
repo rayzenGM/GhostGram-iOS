@@ -18,39 +18,39 @@ private final class AccountPresenceManagerImpl {
     
     private var activityDisposable: Disposable?
     private var actionTimer: SignalKitTimer?
-    private var isForeground = false
+    private var selfPresenceDisposable: Disposable?
+    private var selfOnlineUntil: Int32 = 0
+    private var needsGhostOffline = false
     
-    init(queue: Queue, shouldKeepOnlinePresence: Signal<Bool, NoError>, network: Network) {
+    init(queue: Queue, shouldKeepOnlinePresence: Signal<Bool, NoError>, network: Network, postbox: Postbox, accountPeerId: PeerId) {
         self.queue = queue
         self.network = network
         
         self.shouldKeepOnlinePresenceDisposable = (combineLatest(shouldKeepOnlinePresence |> distinctUntilChanged, GhostGramSettings.shared.signal)
         |> deliverOn(self.queue)).start(next: { [weak self] value, _ in
             guard let self else { return }
-            self.isForeground = value
             self.actionTimer?.invalidate()
             self.actionTimer = nil
             let settings = GhostGramSettings.shared
-            let online = value && !settings.active(.hideOnline) && !settings.active(.automaticOffline)
+            let online = value && !settings.active(.hideOnline)
             self.updatePresence(online)
+            self.needsGhostOffline = online
+            if settings.active(.automaticOffline) { self.startGhostOfflineTimer() }
+        })
+        self.selfPresenceDisposable = (postbox.peerView(id: accountPeerId)
+        |> deliverOn(self.queue)).start(next: { [weak self] view in
+            guard let self else { return }
+            if let presence = view.peerPresences[accountPeerId] as? TelegramUserPresence, case let .present(until) = presence.status {
+                self.selfOnlineUntil = until
+            } else {
+                self.selfOnlineUntil = 0
+            }
         })
         self.activityDisposable = (network.ghostGramActivity.signal()
         |> deliverOn(self.queue)).start(next: { [weak self] _ in
             guard let self, GhostGramSettings.shared.active(.automaticOffline) else { return }
-            self.actionTimer?.invalidate()
-            if !self.isForeground {
-                self.updatePresence(false)
-                return
-            }
-            if !GhostGramSettings.shared.active(.hideOnline) {
-                self.updatePresence(true)
-            }
-            let timer = SignalKitTimer(timeout: 3.0, repeat: false, completion: { [weak self] in
-                guard let self else { return }
-                self.updatePresence(false)
-            }, queue: self.queue)
-            self.actionTimer = timer
-            timer.start()
+            self.needsGhostOffline = true
+            self.startGhostOfflineTimer()
         })
     }
     
@@ -59,10 +59,27 @@ private final class AccountPresenceManagerImpl {
         self.shouldKeepOnlinePresenceDisposable?.dispose()
         self.currentRequestDisposable.dispose()
         self.activityDisposable?.dispose()
+        self.selfPresenceDisposable?.dispose()
         self.actionTimer?.invalidate()
         self.onlineTimer?.invalidate()
     }
     
+    // AyuGram-style worker: successful revealing actions reset a three-second
+    // interval; self-presence updates also catch online status outside those RPCs.
+    private func startGhostOfflineTimer() {
+        self.actionTimer?.invalidate()
+        let timer = SignalKitTimer(timeout: 3.0, repeat: true, completion: { [weak self] in
+            guard let self, GhostGramSettings.shared.active(.automaticOffline) else { return }
+            if self.needsGhostOffline || self.selfOnlineUntil > Int32(Date().timeIntervalSince1970) {
+                self.needsGhostOffline = false
+                self.selfOnlineUntil = 0
+                self.updatePresence(false)
+            }
+        }, queue: self.queue)
+        self.actionTimer = timer
+        timer.start()
+    }
+
     private func updatePresence(_ isOnline: Bool) {
         self.onlineTimer?.invalidate()
         self.onlineTimer = nil
@@ -87,7 +104,11 @@ private final class AccountPresenceManagerImpl {
         |> `catch` { _ -> Signal<Api.Bool, NoError> in
             return .single(.boolFalse)
         }
-        |> deliverOn(self.queue)).start(completed: { [weak self] in
+        |> deliverOn(self.queue)).start(next: { [weak self] result in
+            if !isOnline, case .boolFalse = result {
+                self?.needsGhostOffline = true
+            }
+        }, completed: { [weak self] in
             guard let strongSelf = self else {
                 return
             }
@@ -100,10 +121,10 @@ final class AccountPresenceManager {
     private let queue = Queue()
     private let impl: QueueLocalObject<AccountPresenceManagerImpl>
     
-    init(shouldKeepOnlinePresence: Signal<Bool, NoError>, network: Network) {
+    init(shouldKeepOnlinePresence: Signal<Bool, NoError>, network: Network, postbox: Postbox, accountPeerId: PeerId) {
         let queue = self.queue
         self.impl = QueueLocalObject(queue: self.queue, generate: {
-            return AccountPresenceManagerImpl(queue: queue, shouldKeepOnlinePresence: shouldKeepOnlinePresence, network: network)
+            return AccountPresenceManagerImpl(queue: queue, shouldKeepOnlinePresence: shouldKeepOnlinePresence, network: network, postbox: postbox, accountPeerId: accountPeerId)
         })
     }
     

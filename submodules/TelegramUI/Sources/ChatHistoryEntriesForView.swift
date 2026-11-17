@@ -90,6 +90,8 @@ func chatHistoryEntriesForView(
     isMusicPlaylist: Bool,
     pinToTopStableId: EngineMessage.StableId?
 ) -> ([ChatHistoryEntry], ChatHistoryEntriesForViewState) {
+    let adMessage = GhostGramSettings.shared.value(.hideAds) ? nil : adMessage
+    let dynamicAdMessages = GhostGramSettings.shared.value(.hideAds) ? [] : dynamicAdMessages
     var currentState = currentState
     
     if historyAppearsCleared {
@@ -878,6 +880,20 @@ func chatHistoryEntriesForView(
         }
     }
     
+    // RAM-only previews are rendered alongside real history, never stored as messages.
+    if subject == nil, !isMusicPlaylist, view.tag == nil, let peerId = location.peerId {
+        let snapshots = GhostGramSessionHistory.shared.messages(accountId: context.account.peerId, peerId: peerId, threadId: location.threadId)
+        let lower = view.entries.first?.message.timestamp
+        let upper = view.entries.last?.message.timestamp
+        for message in snapshots {
+            if view.earlierId != nil, let lower, message.timestamp < lower { continue }
+            if view.laterId != nil, let upper, message.timestamp > upper { continue }
+            if pendingRemovedMessages.contains(message.id) { continue }
+            entries.append(.MessageEntry(message, presentationData, false, nil, .none, ChatMessageEntryAttributes()))
+        }
+        if !snapshots.isEmpty { entries.sort() }
+    }
+
     if isMusicPlaylist && entries.count == 1 {
         return ([], currentState)
     }

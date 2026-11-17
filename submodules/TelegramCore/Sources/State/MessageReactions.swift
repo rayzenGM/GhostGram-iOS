@@ -27,7 +27,6 @@ public func updateMessageReactionsInteractively(account: Account, messageIds: [M
             return
         }
         
-        if !reactions.isEmpty { ghostGramReadOnAction(account: account, peerId: chatPeerId) }
 
         var messagesWithoutGroups: [Message] = []
         var messagesByGroupId: [Int64: [Message]] = [:]
@@ -378,6 +377,9 @@ private func requestUpdateMessageReaction(postbox: Postbox, network: Network, st
             return .generic
         }
         |> mapToSignal { result -> Signal<Never, RequestUpdateMessageReactionError> in
+            if reactions?.isEmpty == false {
+                ghostGramReadOnAction(postbox: postbox, network: network, stateManager: stateManager, peerId: messageId.peerId, throughMessageId: messageId)
+            }
             return postbox.transaction { transaction -> Void in
                 transaction.setPendingMessageAction(type: .updateReaction, id: messageId, action: UpdateMessageReactionsAction())
                 transaction.updateMessage(messageId, update: { currentMessage in

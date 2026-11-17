@@ -1141,3 +1141,26 @@ Regression coverage: `Tests/GhostGramPrivacyTests.swift` checks transport silenc
 completion without invented server state, one-request read permission, and the
 master switch. Device validation must also check two chats, a second account,
 stories, typing, repeated actions, and backgrounding during the three-second timer.
+
+
+### GhostGram session-only history (2026-11-17)
+
+`GhostGramSessionHistory` captures loaded content immediately before received deletion/edit replay.
+The original server mutation is unchanged: no suppressed deletion, synthetic pts, or resurrected Postbox row.
+The chat renders separate local-namespace preview entries from RAM, scoped by account/chat/topic and bounded
+by the loaded timestamp window. Previous edits appear as labelled preview bubbles, not a separate archive.
+Nothing is serialized: process death (including iOS background termination) clears it. Metadata is capped
+at 1000 snapshots for iPhone 8; media bytes are not duplicated and normal cache eviction still applies.
+Timed/view-once content is excluded. The switches are independent of the ghost master switch.
+Only content already loaded when a received update is replayed can be captured; missing-history resets,
+expired media, and messages deleted before this process observed them cannot be recovered.
+Logging out clears the RAM archive. `GhostGramSessionHistoryTests` pins session lifetime, account/topic
+isolation, duplicate deletion, option gating and the memory bound.
+
+Reactions now release a receipt only after successful sendReaction, bounded to its target message even
+when local unread state is ahead. The offline worker checks cached self-presence every three seconds,
+resetting that interval after revealing RPCs. These are Swift adaptations of the AyuGram behavior;
+see `docs/ghostgram-reference.md`.
+
+Validation on Windows: no Xcode/simulator is available. Full Make.py build, TelegramCoreTests,
+state-sync truth seeds 1–5000, and recorded UI frames remain required on macOS before release.

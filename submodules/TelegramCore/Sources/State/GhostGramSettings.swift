@@ -1,8 +1,10 @@
 import Foundation
+import Postbox
 import SwiftSignalKit
 
 public enum GhostGramOption: String, CaseIterable {
     case enabled, hideRead, hideStoryRead, hideOnline, hideTyping, automaticOffline, readOnAction
+    case saveDeleted, saveEdits, saveInBots, localPremium, hideAds
 }
 
 public final class GhostGramSettings {
@@ -11,11 +13,31 @@ public final class GhostGramSettings {
     private let changes = ValuePromise<Int>(0)
     private let lock = NSRecursiveLock()
     private var revision = 0
+    private var localAccounts: [PeerId: Int] = [:]
+
+    func retainAccount(_ id: PeerId) {
+        self.lock.lock()
+        self.localAccounts[id, default: 0] += 1
+        self.lock.unlock()
+    }
+
+    func releaseAccount(_ id: PeerId) {
+        self.lock.lock()
+        if let count = self.localAccounts[id], count > 1 { self.localAccounts[id] = count - 1 }
+        else { self.localAccounts.removeValue(forKey: id) }
+        self.lock.unlock()
+    }
+
+    func hasLocalPremium(_ id: PeerId) -> Bool {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        return self.localAccounts[id] != nil && self.value(.localPremium)
+    }
 
     public func value(_ option: GhostGramOption) -> Bool {
         self.lock.lock()
         defer { self.lock.unlock() }
-        return self.defaults.object(forKey: "GhostGram." + option.rawValue) as? Bool ?? (option != .enabled && option != .readOnAction)
+        return self.defaults.object(forKey: "GhostGram." + option.rawValue) as? Bool ?? [GhostGramOption.hideRead, .hideStoryRead, .hideOnline, .hideTyping, .automaticOffline].contains(option)
     }
 
     public func active(_ option: GhostGramOption) -> Bool {

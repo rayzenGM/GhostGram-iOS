@@ -367,6 +367,7 @@ public func currentAccount(allocateIfNotExists: Bool, networkArguments: NetworkI
 }
 
 public func logoutFromAccount(id: AccountRecordId, accountManager: AccountManager<TelegramAccountManagerTypes>, alreadyLoggedOutRemotely: Bool) -> Signal<Void, NoError> {
+    GhostGramSessionHistory.shared.clear()
     Logger.shared.log("AccountManager", "logoutFromAccount \(id)")
     return accountManager.transaction { transaction -> Void in
         transaction.updateRecord(id, { current in

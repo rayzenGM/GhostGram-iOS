@@ -514,7 +514,7 @@ public extension EnginePeer {
     }
     
     var isPremium: Bool {
-        return self._asPeer().isPremium
+        return self._asPeer().isPremium || GhostGramSettings.shared.hasLocalPremium(self.id)
     }
     
     var isSubscription: Bool {

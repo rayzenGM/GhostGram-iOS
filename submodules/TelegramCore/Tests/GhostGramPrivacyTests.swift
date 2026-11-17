@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import Postbox
 import SwiftSignalKit
 @testable import TelegramApi
 @testable import TelegramCore
@@ -61,4 +62,16 @@ final class GhostGramPrivacyTests: XCTestCase {
         XCTAssertFalse(ghostGramSuppressRequest("messages.getHistory", allowRead: false))
         XCTAssertFalse(ghostGramSuppressRequest("updates.getDifference", allowRead: false))
     }
+    func testLocalPremiumIsLimitedToRegisteredAccounts() {
+        let own = PeerId(namespace: Namespaces.Peer.CloudUser, id: ._internalFromInt64Value(12345))
+        let other = PeerId(namespace: Namespaces.Peer.CloudUser, id: ._internalFromInt64Value(54321))
+        let settings = GhostGramSettings.shared
+        settings.retainAccount(own)
+        defer { settings.releaseAccount(own) }
+        XCTAssertTrue(settings.hasLocalPremium(own))
+        XCTAssertFalse(settings.hasLocalPremium(other))
+        settings.set(.localPremium, value: false)
+        XCTAssertFalse(settings.hasLocalPremium(own))
+    }
+
 }

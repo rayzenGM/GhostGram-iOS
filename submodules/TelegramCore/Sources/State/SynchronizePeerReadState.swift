@@ -463,17 +463,32 @@ func synchronizePeerReadState(network: Network, postbox: Postbox, stateManager: 
 // A deliberate action releases a snapshot for this peer only. There is no global
 // time window in which another chat could leak its read receipts.
 func ghostGramReadOnAction(account: Account, peerId: PeerId) {
-    guard GhostGramSettings.shared.active(.readOnAction) else { return }
+    ghostGramReadOnAction(postbox: account.postbox, network: account.network, stateManager: account.stateManager, peerId: peerId)
+}
+
+func ghostGramReadOnAction(postbox: Postbox, network: Network, stateManager: AccountStateManager, peerId: PeerId, throughMessageId: MessageId? = nil) {
+    guard GhostGramSettings.shared.active(.hideRead), GhostGramSettings.shared.active(.readOnAction) else { return }
     let namespace = peerId.namespace == Namespaces.Peer.SecretChat ? Namespaces.Message.SecretIncoming : Namespaces.Message.Cloud
-    let signal = account.postbox.transaction { transaction -> PeerReadState? in
-        guard let index = transaction.getTopPeerMessageIndex(peerId: peerId, namespace: namespace),
-              peerKeepsReadState(transaction.getPeer(peerId)) else { return nil }
-        _internal_applyMaxReadIndexInteractively(transaction: transaction, stateManager: account.stateManager, index: index)
-        return transaction.getPeerReadStates(peerId)?.first(where: { $0.0 == namespace })?.1
+    let signal = postbox.transaction { transaction -> PeerReadState? in
+        let index: MessageIndex?
+        if let throughMessageId {
+            index = transaction.getMessage(throughMessageId)?.index
+        } else {
+            index = transaction.getTopPeerMessageIndex(peerId: peerId, namespace: namespace)
+        }
+        guard let index, peerKeepsReadState(transaction.getPeer(peerId)) else { return nil }
+        _internal_applyMaxReadIndexInteractively(transaction: transaction, stateManager: stateManager, index: index)
+        guard let state = transaction.getPeerReadStates(peerId)?.first(where: { $0.0 == namespace })?.1 else { return nil }
+        // Local history can already be read further while receipts are suppressed.
+        // Reacting to an older message must not reveal those newer reads.
+        if let throughMessageId, case let .idBased(_, outgoing, known, count, markedUnread) = state {
+            return .idBased(maxIncomingReadId: throughMessageId.id, maxOutgoingReadId: outgoing, maxKnownId: known, count: count, markedUnread: markedUnread)
+        }
+        return state
     }
     |> mapToSignal { state -> Signal<Never, NoError> in
         guard let state else { return .complete() }
-        return pushPeerReadState(network: account.network, postbox: account.postbox, stateManager: account.stateManager, peerId: peerId, readState: state, ghostAllowRead: true)
+        return pushPeerReadState(network: network, postbox: postbox, stateManager: stateManager, peerId: peerId, readState: state, ghostAllowRead: true)
         |> `catch` { _ -> Signal<PeerReadState, NoError> in return .complete() }
         |> ignoreValues
     }

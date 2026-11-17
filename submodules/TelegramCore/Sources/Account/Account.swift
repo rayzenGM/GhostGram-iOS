@@ -1332,6 +1332,7 @@ public class Account {
         self.network = network
         self.networkArguments = networkArguments
         self.peerId = peerId
+        GhostGramSettings.shared.retainAccount(peerId)
         
         self.auxiliaryMethods = auxiliaryMethods
         self.supplementary = supplementary
@@ -1375,7 +1376,7 @@ public class Account {
         
         self.contactSyncManager = ContactSyncManager(postbox: postbox, network: network, accountPeerId: peerId, stateManager: self.stateManager)
         self.localInputActivityManager = PeerInputActivityManager()
-        self.accountPresenceManager = AccountPresenceManager(shouldKeepOnlinePresence: self.shouldKeepOnlinePresence.get(), network: network)
+        self.accountPresenceManager = AccountPresenceManager(shouldKeepOnlinePresence: self.shouldKeepOnlinePresence.get(), network: network, postbox: postbox, accountPeerId: peerId)
         #if os(iOS)
         // iOS only for now: the Rust engine is the macOS default, and its online keepalive cadence
         // (pings every 1-2 s while the account is in front) has not been measured there.
@@ -1648,6 +1649,7 @@ public class Account {
     }
     
     deinit {
+        GhostGramSettings.shared.releaseAccount(self.peerId)
         self.managedContactsDisposable.dispose()
         self.managedStickerPacksDisposable.dispose()
         self.managedServiceViewsDisposable.dispose()

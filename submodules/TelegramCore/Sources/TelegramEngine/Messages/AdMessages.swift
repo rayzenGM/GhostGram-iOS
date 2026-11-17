@@ -451,6 +451,8 @@ private class AdMessagesHistoryContextImpl {
 
         self.stateValue = State(interPostInterval: nil, messages: [])
 
+        if GhostGramSettings.shared.value(.hideAds) { return }
+
         if messageId == nil {
             self.state.set(CachedState.getCached(postbox: account.postbox, peerId: peerId)
             |> mapToSignal { cachedState -> Signal<State, NoError> in
@@ -477,6 +479,7 @@ private class AdMessagesHistoryContextImpl {
     }
     
     func activate() {
+        if GhostGramSettings.shared.value(.hideAds) { return }
         if self.isActivated {
             return
         }

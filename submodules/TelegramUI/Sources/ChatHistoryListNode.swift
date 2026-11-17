@@ -1958,7 +1958,7 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
         var measure_isFirstTime = true
         let messageViewQueue = Queue.mainQueue()
         let historyViewTransitionDisposable = (combineLatest(queue: messageViewQueue,
-            historyViewUpdate |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_historyViewUpdate"),
+            combineLatest(historyViewUpdate, GhostGramSessionHistory.shared.signal, GhostGramSettings.shared.signal) |> map { update, _, _ in update } |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_historyViewUpdate"),
             self.chatPresentationDataPromise.get() |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_chatPresentationData"),
             selectedMessages |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_selectedMessages"),
             updatingMedia |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_updatingMedia"),
@@ -4096,7 +4096,7 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
         var rows: [ChatHistoryVisibleReadRow] = []
         self.forEachVisibleMessageItemNode { itemNode in
             if let item = itemNode.item, let itemFrame = self.listView.itemNodeFrame(itemNode) {
-                rows.append(ChatHistoryVisibleReadRow(frame: itemFrame, messages: item.content.map { $0.0.index }))
+                rows.append(ChatHistoryVisibleReadRow(frame: itemFrame, messages: item.content.filter { !GhostGramSessionHistory.isPreview($0.0.id) }.map { $0.0.index }))
             }
         }
         if let maxMessage = chatHistoryMaxVisibleReadIndex(rows: rows, topInset: self.insets.top, lastMessageId: lastMessageId, isThread: self.chatLocation.threadId != nil) {
